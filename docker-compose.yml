@@ -1,10 +1,11 @@
-version: '3'
+version: '3.8'
 
 services:
   nginx:
     image: nginx:alpine
     container_name: main-nginx
     restart: unless-stopped
+    env_file: .env
     volumes:
       - ./data/nginx:/etc/nginx
       - ./data/certbot/conf:/etc/letsencrypt
@@ -12,18 +13,37 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      - "8080:8080" # Monitoring port
     command: "/bin/sh -c 'while :; do sleep 48h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
     networks:
       - proxy-network
+    deploy:
+      resources:
+        limits:
+          cpus: '${CPU_LIMIT:-0.5}'
+          memory: '${MEM_LIMIT:-512M}'
+    healthcheck:
+      # Use wget to check the internal health endpoint
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz | grep OK || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   certbot:
     image: certbot/certbot
     container_name: certbot
     restart: unless-stopped
+    env_file: .env
     volumes:
       - ./data/certbot/conf:/etc/letsencrypt
       - ./data/certbot/www:/var/www/certbot
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 48h & wait $${!}; done;'"
+    # Improved entrypoint with better logging and trapped signals
+    entrypoint: "/bin/sh -c 'trap \"exit\" TERM; while :; do echo \"### Checking for renewal... ###\"; certbot renew; sleep 48h & wait $${!}; done;'"
     networks:
       - proxy-network
 
